@@ -98,6 +98,81 @@ function pickRandomJapaneseSong() {
   return picks[Math.floor(Math.random() * picks.length)];
 }
 
+// Search terms deliberately phrased to surface what's currently popular
+// ("新曲"/"最新"/ranking wording) rather than a fixed song list, so results
+// drift with actual trends over time instead of going stale.
+const TRENDING_SEARCH_QUERIES = [
+  '邦楽 新曲 2026',
+  'JPOP 最新曲',
+  '今月の音楽ランキング 邦楽',
+  '話題の曲 邦楽',
+  'JPOP ヒットチャート',
+  'アニソン 新曲 2026',
+];
+
+// Pulls a batch of current YouTube search results for a trend-oriented
+// query using yt-dlp's flat-playlist mode, which lists titles/ids from the
+// search results page directly without a per-video network round trip
+// (much faster than resolving each candidate individually).
+function fetchTrendingCandidates(query) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(resolveBinary('yt-dlp', 'yt-dlp.exe'), [
+      '--no-warnings',
+      '--flat-playlist',
+      '-J',
+      `ytsearch20:${query}`,
+    ]);
+
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (d) => { out += d; });
+    proc.stderr.on('data', (d) => { err += d; });
+
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code !== 0 || !out.trim()) {
+        return reject(new Error(err || `yt-dlp exited with code ${code}`));
+      }
+      try {
+        const data = JSON.parse(out);
+        const entries = (data.entries || [])
+          // Trend searches surface a lot of hour-long "medley"/"ranking"
+          // compilation videos alongside individual songs; a plausible
+          // single-track duration filters those out without needing a
+          // second per-video lookup.
+          .filter((e) => (
+            e && e.id && e.title &&
+            !e.is_live && e.live_status !== 'is_live' && e.live_status !== 'is_upcoming' &&
+            typeof e.duration === 'number' && e.duration >= 90 && e.duration <= 480
+          ))
+          .map((e) => ({ title: e.title, url: `https://www.youtube.com/watch?v=${e.id}` }));
+        resolve(entries);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+// Picks the next random/loop track. Most of the time this pulls from a live
+// trending search so recent releases show up, not just the fixed songs.txt
+// list; it falls back to songs.txt (customizable by the user) on failure or
+// the remaining rolls, so both sources stay in the mix.
+async function pickPlayableTrack() {
+  if (Math.random() < 0.7) {
+    try {
+      const query = TRENDING_SEARCH_QUERIES[Math.floor(Math.random() * TRENDING_SEARCH_QUERIES.length)];
+      const candidates = await fetchTrendingCandidates(query);
+      if (candidates.length > 0) {
+        return candidates[Math.floor(Math.random() * candidates.length)];
+      }
+    } catch (err) {
+      console.error('[ランダム] トレンド検索に失敗、songs.txtから選びます:', err.message || err);
+    }
+  }
+  return resolveTrack(pickRandomJapaneseSong());
+}
+
 const app = express();
 const PORT = process.env.PORT || 3535;
 const ACCESS_CODE = process.env.ACCESS_CODE || '';
@@ -398,10 +473,9 @@ function resolveTrack(query) {
 
 async function playNext() {
   if (queue.length === 0 && randomLoopEnabled) {
-    const query = pickRandomJapaneseSong();
-    console.log(`[ランダムループ] 「${query}」を検索しています...`);
+    console.log('[ランダムループ] 次の曲を探しています...');
     try {
-      const track = await resolveTrack(query);
+      const track = await pickPlayableTrack();
       queue.push(track);
       console.log(`[ランダムループ] キューに追加: ${track.title}`);
     } catch (err) {
@@ -482,13 +556,17 @@ async function playNext() {
   ffplayProc.on('close', advance);
 }
 
-async function queueTrack(query) {
-  const track = await resolveTrack(query);
+function enqueueTrack(track) {
   queue.push(track);
   if (!current) {
     playNext();
   }
   return track;
+}
+
+async function queueTrack(query) {
+  const track = await resolveTrack(query);
+  return enqueueTrack(track);
 }
 
 app.post('/api/play', async (req, res) => {
@@ -626,10 +704,10 @@ function startConsoleCommands() {
 
     if (cmd !== 'random' && cmd !== 'r') return;
 
-    const query = pickRandomJapaneseSong();
-    console.log(`ランダム再生: 「${query}」を検索しています...`);
+    console.log('ランダム再生: 曲を探しています...');
     try {
-      const track = await queueTrack(query);
+      const track = await pickPlayableTrack();
+      enqueueTrack(track);
       console.log(`キューに追加しました: ${track.title}`);
     } catch (err) {
       console.error('ランダム再生の取得に失敗しました:', err);
