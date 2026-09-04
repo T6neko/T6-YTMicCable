@@ -13,9 +13,11 @@ const { spawn, spawnSync } = require('child_process');
 // must be read via sea.getAsset().
 const IS_SEA = sea.isSea();
 
-// A grab-bag of songs widely familiar in Japan (J-pop hits, anime openings,
-// Vocaloid classics) used by the "random" console command below.
-const JAPANESE_SONG_PICKS = [
+// Default grab-bag of songs widely familiar in Japan (J-pop hits, anime
+// openings, Vocaloid classics), used to seed songs.txt on first run. Users
+// edit songs.txt directly (one YouTube search term per line) to customize
+// what the "random" console command picks from.
+const DEFAULT_SONG_PICKS = [
   '米津玄師 Lemon',
   'YOASOBI 夜に駆ける',
   'YOASOBI アイドル',
@@ -61,8 +63,39 @@ const JAPANESE_SONG_PICKS = [
   'アンパンマン アンパンマンのマーチ',
 ];
 
+// songs.txt lives next to the exe (or the project root in dev mode) so it's
+// easy to find and edit with a plain text editor - not embedded as a SEA
+// asset, since those are read-only.
+function getDataDir() {
+  return IS_SEA ? path.dirname(process.execPath) : __dirname;
+}
+const SONGS_FILE = path.join(getDataDir(), 'songs.txt');
+
+function ensureSongsFile() {
+  if (fs.existsSync(SONGS_FILE)) return;
+  const header =
+    '# "random" コマンドがここから曲をランダムに選びます。\n' +
+    '# 1行に1曲、YouTubeの検索ワード（曲名やアーティスト名、URLでも可）を書いてください。\n' +
+    '# "#" で始まる行と空行は無視されます。保存すればアプリを再起動しなくても反映されます。\n\n';
+  fs.writeFileSync(SONGS_FILE, header + DEFAULT_SONG_PICKS.join('\n') + '\n', 'utf8');
+}
+
+function loadSongPicks() {
+  try {
+    const lines = fs.readFileSync(SONGS_FILE, 'utf8')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+    if (lines.length > 0) return lines;
+  } catch {
+    // fall through to defaults below
+  }
+  return DEFAULT_SONG_PICKS;
+}
+
 function pickRandomJapaneseSong() {
-  return JAPANESE_SONG_PICKS[Math.floor(Math.random() * JAPANESE_SONG_PICKS.length)];
+  const picks = loadSongPicks();
+  return picks[Math.floor(Math.random() * picks.length)];
 }
 
 const app = express();
@@ -622,6 +655,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
 }
 
 (async () => {
+  ensureSongsFile();
   await ensureDependencies();
   await ensureVBCable();
 
@@ -629,6 +663,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
     console.log(`YouTube -> Virtual Mic player running at http://localhost:${PORT}`);
     console.log('公開用トンネルを起動しています...');
     startTunnel(PORT);
+    console.log(`ランダム再生の曲リストは ${SONGS_FILE} を編集するとカスタマイズできます。`);
     console.log('このコンソールで "random" と入力するとランダム再生、"random loop" で無限ループ再生、"loop stop" で停止します。');
     startConsoleCommands();
   });
