@@ -354,6 +354,12 @@ async function playNext() {
   const advance = () => {
     if (advanced || generation !== playGeneration) return;
     advanced = true;
+    // ffplay closing doesn't mean the paired yt-dlp download has finished -
+    // for a live stream in particular it can otherwise keep running forever,
+    // orphaned, as a hidden background process.
+    if (ytdlpProc) {
+      ytdlpProc.kill('SIGKILL');
+    }
     ytdlpProc = null;
     ffplayProc = null;
     playNext();
@@ -450,9 +456,12 @@ function resolveCloudflaredPath() {
   return fs.existsSync(fallback) ? fallback : 'cloudflared';
 }
 
+let tunnelProc = null;
+
 function startTunnel(port) {
   const bin = resolveCloudflaredPath();
   const proc = spawn(bin, ['tunnel', '--url', `http://localhost:${port}`]);
+  tunnelProc = proc;
   let printed = false;
 
   const onOutput = (d) => {
@@ -474,10 +483,6 @@ function startTunnel(port) {
   proc.on('error', (err) => {
     console.error('cloudflaredの起動に失敗しました。インストールされているか確認してください。', err);
   });
-
-  const cleanup = () => proc.kill();
-  process.on('exit', cleanup);
-  process.on('SIGINT', () => { cleanup(); process.exit(); });
 
   return proc;
 }
@@ -519,6 +524,23 @@ function startConsoleCommands() {
       console.error('ランダム再生の取得に失敗しました:', err);
     }
   });
+}
+
+// Without this, closing the app (window X, Ctrl+C, task kill) leaves the
+// currently playing track's yt-dlp/ffplay pair and the cloudflared tunnel
+// running forever in the background as orphaned processes - for a live
+// stream in particular, that means it silently keeps "playing" long after
+// the app appears to be gone.
+let cleanedUp = false;
+function cleanupAndExit() {
+  if (cleanedUp) return;
+  cleanedUp = true;
+  stopCurrent();
+  if (tunnelProc) tunnelProc.kill('SIGKILL');
+}
+process.on('exit', cleanupAndExit);
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
+  process.on(signal, () => { cleanupAndExit(); process.exit(); });
 }
 
 (async () => {
