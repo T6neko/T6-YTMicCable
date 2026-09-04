@@ -218,6 +218,13 @@ async function ensureDependencies() {
 const VBCABLE_DOWNLOAD_URL = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip';
 
 function isVBCableInstalled() {
+  // Testing hook: `FORCE_VBCABLE_INSTALL=1 npm start` makes this always
+  // report "not installed" so you can exercise the real download -> extract
+  // -> silent-install flow on a machine that already has VB-CABLE, without
+  // needing a second PC. Re-running the real installer over an existing
+  // install just repairs/reinstalls it - harmless.
+  if (process.env.FORCE_VBCABLE_INSTALL === '1') return false;
+
   const result = spawnSync(resolvePowerShell(), [
     '-NoProfile', '-NonInteractive', '-Command',
     "if (Get-CimInstance Win32_PnPEntity -Filter \"Name like '%VB-Audio Virtual Cable%'\") { 'YES' } else { 'NO' }",
