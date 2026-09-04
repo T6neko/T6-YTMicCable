@@ -1,0 +1,9 @@
+{
+  "main": "dist/bundle.js",
+  "output": "dist/sea-prep.blob",
+  "disableExperimentalSEAWarning": true,
+  "assets": {
+    "index_html": "public/index.html",
+    "set_app_volume_ps1": "scripts/set-app-volume.ps1"
+  }
+}
