@@ -215,6 +215,77 @@ async function ensureDependencies() {
   }
 }
 
+const VBCABLE_DOWNLOAD_URL = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip';
+
+function isVBCableInstalled() {
+  const result = spawnSync(resolvePowerShell(), [
+    '-NoProfile', '-NonInteractive', '-Command',
+    "if (Get-CimInstance Win32_PnPEntity -Filter \"Name like '%VB-Audio Virtual Cable%'\") { 'YES' } else { 'NO' }",
+  ], { encoding: 'utf8' });
+  return !result.error && result.stdout.trim() === 'YES';
+}
+
+// VB-CABLE has no winget package, so it's fetched directly from the
+// vendor's site and installed silently. This is not a Windows-signed
+// package we control, and installing a kernel audio driver requires admin
+// rights - Windows will show a UAC prompt that only the user can approve;
+// there is no way to skip that consent step.
+async function ensureVBCable() {
+  if (isVBCableInstalled()) return;
+
+  console.log('[初回セットアップ] VB-Audio Virtual Cable が見つかりません。インストールします...');
+  console.log('[初回セットアップ] 管理者権限の確認ダイアログが表示されたら「はい」を押してください。');
+
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vbcable-'));
+  const zipPath = path.join(workDir, 'VBCABLE_Driver_Pack.zip');
+
+  try {
+    const res = await fetch(VBCABLE_DOWNLOAD_URL);
+    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+    fs.writeFileSync(zipPath, Buffer.from(await res.arrayBuffer()));
+  } catch (err) {
+    console.error(
+      '[初回セットアップ] VB-CABLEのダウンロードに失敗しました。' +
+      'https://vb-audio.com/Cable/ から手動でインストールしてください。', err
+    );
+    return;
+  }
+
+  const extractDir = path.join(workDir, 'extracted');
+  const unzip = spawnSync(resolvePowerShell(), [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Expand-Archive -Path '${zipPath}' -DestinationPath '${extractDir}' -Force`,
+  ]);
+  if (unzip.error || unzip.status !== 0) {
+    console.error('[初回セットアップ] VB-CABLEの展開に失敗しました。手動でインストールしてください。');
+    return;
+  }
+
+  const installerName = os.arch() === 'x64' ? 'VBCABLE_Setup_x64.exe' : 'VBCABLE_Setup.exe';
+  const installerPath = path.join(extractDir, installerName);
+  if (!fs.existsSync(installerPath)) {
+    console.error(`[初回セットアップ] ${installerName} が展開先に見つかりませんでした。手動でインストールしてください。`);
+    return;
+  }
+
+  // -i -h = silent install. Still requires elevation (kernel driver), hence -Verb RunAs.
+  const install = spawnSync(resolvePowerShell(), [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Start-Process -FilePath '${installerPath}' -ArgumentList '-i','-h' -Verb RunAs -Wait`,
+  ]);
+
+  if (install.error || install.status !== 0) {
+    console.error(
+      '[初回セットアップ] VB-CABLEのインストールに失敗しました' +
+      '（管理者権限の確認でキャンセルした場合もここに来ます）。' +
+      `手動でインストールしてください: ${installerPath}`
+    );
+    return;
+  }
+
+  console.log('[初回セットアップ] VB-CABLEをインストールしました。反映されない場合はPCの再起動をお試しください。');
+}
+
 // Live volume control: ffplay itself has no way to change volume once
 // running (it only reads -volume at startup, and stdin is busy carrying
 // audio data). Instead we reach into Windows' own per-app volume mixer via
@@ -545,6 +616,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
 
 (async () => {
   await ensureDependencies();
+  await ensureVBCable();
 
   app.listen(PORT, () => {
     console.log(`YouTube -> Virtual Mic player running at http://localhost:${PORT}`);
