@@ -5,23 +5,28 @@
 
 ## セットアップ
 
-### 1. VB-Audio Virtual Cable のインストール
-1. https://vb-audio.com/Cable/ ページ上部の「VB-CABLE」（無印・無料版）をダウンロードしてインストール
-2. PCを再起動（必要な場合あり）
-
-### 2. アプリの起動
+### 1. アプリの起動
 ```
 npm start
 ```
-`ffmpeg`/`yt-dlp`/`cloudflared` が無い場合は自動でインストールされます（初回のみ時間がかかります）。
+`ffmpeg`/`yt-dlp`/`cloudflared`/`VB-Audio Virtual Cable` が無い場合は自動でインストールされます
+（初回のみ時間がかかります）。VB-CABLEのインストール中だけ、Windowsの管理者権限の確認
+ダイアログが表示されるので「はい」を押してください（これだけは自動化できません）。
+
 起動後、`http://localhost:3535` をブラウザで開きます。
 
-### 3. 音声出力先を仮想ケーブルに向ける
+自動インストールに失敗した場合は、https://vb-audio.com/Cable/ から「VB-CABLE」（無印・無料版）を
+手動でダウンロード・インストールしてください（PCの再起動が必要な場合があります）。
+
+### 2. 音声出力先を仮想ケーブルに向ける
 1. Windows設定 → システム → サウンド → 「音量ミキサー」を開く
 2. 曲を再生した状態で一覧から `ffplay.exe` を探す
 3. 出力先を **CABLE Input (VB-Audio Virtual Cable)** に変更
 
-### 4. Discord側のマイクを仮想ケーブルに切り替える
+（この手順だけは自動化できていません。Windows内部の非公開の仕組みを使う必要があり、
+安全に自動化できなかったためです）
+
+### 3. Discord側のマイクを仮想ケーブルに切り替える
 Discordの 設定 → 音声・ビデオ → 入力デバイス を **CABLE Output (VB-Audio Virtual Cable)** に変更します。
 
 自分の声も一緒に聞かせたい場合は、VB-CABLEとは別に「アプリ間ミキサー」（例: Voicemeeter）で
