@@ -13,7 +13,9 @@ Write-Output "2/4: generating SEA blob..."
 node --experimental-sea-config sea-config.json
 
 Write-Output "3/4: copying node.exe..."
-$outExe = "$root\T6-YTMicCable.exe"
+$distDir = "$root\T6-YTMicCable"
+New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+$outExe = "$distDir\T6-YTMicCable.exe"
 if (Test-Path $outExe) { Remove-Item $outExe -Force }
 Copy-Item (Get-Command node).Source $outExe
 
@@ -31,6 +33,12 @@ Write-Output "4/4: injecting bundle into the exe (postject)..."
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 `
   --overwrite
 
+Copy-Item "$root\README.md" "$distDir\README.md" -Force
+
+$envFile = "$distDir\.env"
+if (-not (Test-Path $envFile)) {
+  "ACCESS_CODE=password" | Out-File -FilePath $envFile -Encoding utf8 -NoNewline
+}
+
 Write-Output ""
-Write-Output "Done: $outExe"
-Write-Output "Place a .env file next to the exe before running it."
+Write-Output "Done: $distDir (ready to run - contains the exe, .env, and README.md)"
