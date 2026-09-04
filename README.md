@@ -61,5 +61,5 @@ Discordの 設定 → 音声・ビデオ → 入力デバイス を **CABLE Outp
 ```
 npm run build:exe
 ```
-`DiscordMusicPlayer.exe` が生成されます。`.env` を同じフォルダに置いて実行すれば、
+`T6-YTMicCable.exe` が生成されます。`.env` を同じフォルダに置いて実行すれば、
 Node.jsが無いPCでも `npm start` と同じように使えます。

@@ -1,4 +1,4 @@
-# Builds DiscordMusicPlayer.exe: a standalone executable that runs without
+# Builds T6-YTMicCable.exe: a standalone executable that runs without
 # Node.js being installed on the target machine (ffmpeg/yt-dlp/cloudflared
 # are still required separately - see README.md).
 $ErrorActionPreference = 'Stop'
@@ -13,7 +13,7 @@ Write-Output "2/4: generating SEA blob..."
 node --experimental-sea-config sea-config.json
 
 Write-Output "3/4: copying node.exe..."
-$outExe = "$root\DiscordMusicPlayer.exe"
+$outExe = "$root\T6-YTMicCable.exe"
 if (Test-Path $outExe) { Remove-Item $outExe -Force }
 Copy-Item (Get-Command node).Source $outExe
 
