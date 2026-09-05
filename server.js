@@ -479,6 +479,29 @@ function resolveTrack(query) {
   });
 }
 
+// While a track is playing in loop mode, quietly pick the next one in the
+// background so it's already sitting in the queue by the time the current
+// track ends - avoids the several-second search gap between tracks that
+// you'd otherwise hit every time playNext() has to fetch on demand.
+let prefetchInFlight = false;
+async function maybePrefetchNext() {
+  if (!randomLoopEnabled || queue.length > 0 || prefetchInFlight) return;
+  prefetchInFlight = true;
+  try {
+    const track = await pickPlayableTrack();
+    // Loop may have been turned off, or the queue filled some other way
+    // (e.g. someone used "play"), while this fetch was in flight.
+    if (randomLoopEnabled && queue.length === 0) {
+      queue.push(track);
+      console.log(`[ランダムループ] 次の曲を先読みしました: ${track.title}`);
+    }
+  } catch (err) {
+    console.error('[ランダムループ] 先読みに失敗しました:', err.message || err);
+  } finally {
+    prefetchInFlight = false;
+  }
+}
+
 async function playNext() {
   if (queue.length === 0 && randomLoopEnabled) {
     console.log('[ランダムループ] 次の曲を探しています...');
@@ -524,6 +547,7 @@ async function playNext() {
   ], { stdio: ['pipe', 'ignore', 'pipe'] });
 
   status = 'playing';
+  maybePrefetchNext(); // fire-and-forget: get the next loop pick ready while this one plays
   ytdlpProc.stdout.pipe(ffplayProc.stdin);
 
   // Killing either process mid-stream (skip/stop) closes the pipe while the
@@ -742,7 +766,7 @@ function startConsoleCommands() {
       }
       randomLoopEnabled = true;
       console.log('ランダムループを開始しました（"loop stop" で停止できます）。');
-      if (!current) playNext();
+      if (!current) playNext(); else maybePrefetchNext();
       return;
     }
 
