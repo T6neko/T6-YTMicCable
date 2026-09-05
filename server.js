@@ -479,21 +479,24 @@ function resolveTrack(query) {
   });
 }
 
-// While a track is playing in loop mode, quietly pick the next one in the
-// background so it's already sitting in the queue by the time the current
-// track ends - avoids the several-second search gap between tracks that
-// you'd otherwise hit every time playNext() has to fetch on demand.
+// While a track is playing in loop mode, quietly decide the next one in the
+// background so it's ready the instant the current track ends - avoids the
+// several-second search gap you'd otherwise hit every time playNext() has
+// to fetch on demand. Held here internally rather than pushed into `queue`,
+// since it's not something the user picked - it shouldn't show up in the
+// visible queue (web UI / "queue" console command) until it's actually
+// playing.
+let prefetchedTrack = null;
 let prefetchInFlight = false;
 async function maybePrefetchNext() {
-  if (!randomLoopEnabled || queue.length > 0 || prefetchInFlight) return;
+  if (!randomLoopEnabled || prefetchedTrack || prefetchInFlight) return;
   prefetchInFlight = true;
   try {
     const track = await pickPlayableTrack();
-    // Loop may have been turned off, or the queue filled some other way
-    // (e.g. someone used "play"), while this fetch was in flight.
-    if (randomLoopEnabled && queue.length === 0) {
-      queue.push(track);
-      console.log(`[ランダムループ] 次の曲を先読みしました: ${track.title}`);
+    // Loop may have been turned off while this fetch was in flight.
+    if (randomLoopEnabled && !prefetchedTrack) {
+      prefetchedTrack = track;
+      console.log(`[ランダムループ] 次の曲を内部的に決めておきました: ${track.title}`);
     }
   } catch (err) {
     console.error('[ランダムループ] 先読みに失敗しました:', err.message || err);
@@ -503,25 +506,29 @@ async function maybePrefetchNext() {
 }
 
 async function playNext() {
-  if (queue.length === 0 && randomLoopEnabled) {
+  // A track the user explicitly queued always takes priority over the
+  // loop's own background pick.
+  if (queue.length === 0 && randomLoopEnabled && !prefetchedTrack) {
     console.log('[ランダムループ] 次の曲を探しています...');
     try {
-      const track = await pickPlayableTrack();
-      queue.push(track);
-      console.log(`[ランダムループ] キューに追加: ${track.title}`);
+      prefetchedTrack = await pickPlayableTrack();
     } catch (err) {
       console.error('[ランダムループ] 曲の取得に失敗しました。別の曲を試します:', err.message || err);
       return randomLoopEnabled ? playNext() : undefined; // retry, unless the loop was turned off while we were fetching
     }
   }
 
-  if (queue.length === 0) {
+  if (queue.length > 0) {
+    current = queue.shift();
+  } else if (prefetchedTrack) {
+    current = prefetchedTrack;
+    prefetchedTrack = null;
+  } else {
     current = null;
     status = 'idle';
     return;
   }
 
-  current = queue.shift();
   status = 'loading';
 
   const generation = ++playGeneration;
@@ -614,6 +621,7 @@ function doSkip() {
 function doStop() {
   randomLoopEnabled = false; // otherwise playNext() would immediately refill the queue we just cleared
   queue.length = 0;
+  prefetchedTrack = null;
   stopCurrent();
   current = null;
   status = 'idle';
