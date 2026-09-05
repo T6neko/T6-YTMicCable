@@ -569,6 +569,51 @@ async function queueTrack(query) {
   return enqueueTrack(track);
 }
 
+// Shared logic behind both the HTTP API and the console commands below, so
+// "everything the web UI can do" stays in one place instead of two.
+
+function doSkip() {
+  if (!current) return { error: 'Nothing is playing' };
+  stopCurrent();
+  playNext();
+  return { ok: true };
+}
+
+function doStop() {
+  randomLoopEnabled = false; // otherwise playNext() would immediately refill the queue we just cleared
+  queue.length = 0;
+  stopCurrent();
+  current = null;
+  status = 'idle';
+  return { ok: true };
+}
+
+// Removes a single not-yet-playing track from the queue by its position
+// (0 = next up). The currently playing track isn't touched - use doSkip()
+// for that.
+function doRemoveFromQueue(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= queue.length) {
+    return { error: 'invalid queue index' };
+  }
+  const [removed] = queue.splice(index, 1);
+  return { ok: true, removed, queue: queue.map((t) => t.title) };
+}
+
+function doSetVolume(value) {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    return { error: 'volume must be a number between 0 and 100' };
+  }
+  volume = Math.round(value);
+  if (ffplayProc && ffplayProc.pid) {
+    applyLiveVolume(ffplayProc.pid, volume);
+  }
+  return { ok: true, volume };
+}
+
+function getStateSnapshot() {
+  return { status, current, queue: queue.map((t) => t.title), volume };
+}
+
 app.post('/api/play', async (req, res) => {
   const { query } = req.body;
   if (!query || typeof query !== 'string' || !query.trim()) {
@@ -585,56 +630,26 @@ app.post('/api/play', async (req, res) => {
 });
 
 app.post('/api/skip', (req, res) => {
-  if (!current) {
-    return res.status(400).json({ error: 'Nothing is playing' });
-  }
-  stopCurrent();
-  playNext();
-  res.json({ ok: true });
+  const result = doSkip();
+  res.status(result.error ? 400 : 200).json(result);
 });
 
 app.post('/api/stop', (req, res) => {
-  randomLoopEnabled = false; // otherwise playNext() would immediately refill the queue we just cleared
-  queue.length = 0;
-  stopCurrent();
-  current = null;
-  status = 'idle';
-  res.json({ ok: true });
+  res.json(doStop());
 });
 
-// Removes a single not-yet-playing track from the queue by its position
-// (0 = next up). The currently playing track isn't touched - use /api/skip
-// for that.
 app.delete('/api/queue/:index', (req, res) => {
-  const index = Number(req.params.index);
-  if (!Number.isInteger(index) || index < 0 || index >= queue.length) {
-    return res.status(400).json({ error: 'invalid queue index' });
-  }
-  const [removed] = queue.splice(index, 1);
-  res.json({ ok: true, removed, queue: queue.map((t) => t.title) });
+  const result = doRemoveFromQueue(Number(req.params.index));
+  res.status(result.error ? 400 : 200).json(result);
 });
 
 app.post('/api/volume', (req, res) => {
-  const value = Number(req.body.volume);
-  if (!Number.isFinite(value) || value < 0 || value > 100) {
-    return res.status(400).json({ error: 'volume must be a number between 0 and 100' });
-  }
-  volume = Math.round(value);
-
-  if (ffplayProc && ffplayProc.pid) {
-    applyLiveVolume(ffplayProc.pid, volume);
-  }
-
-  res.json({ ok: true, volume });
+  const result = doSetVolume(Number(req.body.volume));
+  res.status(result.error ? 400 : 200).json(result);
 });
 
 app.get('/api/state', (req, res) => {
-  res.json({
-    status,
-    current,
-    queue: queue.map((t) => t.title),
-    volume,
-  });
+  res.json(getStateSnapshot());
 });
 
 // Resolves the cloudflared binary: prefer PATH, fall back to the default
@@ -676,22 +691,43 @@ function startTunnel(port) {
   return proc;
 }
 
-// Console commands, typed directly into this terminal window:
-//   random / r        - queue one random well-known Japanese song
-//   random loop / loop - keep auto-queuing random songs forever as the queue empties
-//   loop stop          - turn the endless loop back off
+const CONSOLE_HELP = `使えるコマンド:
+  play <URLまたは検索ワード> / p <...>  - 曲をキューに追加
+  skip / s                              - 今の曲をスキップ
+  stop                                  - 停止してキューを空にする
+  queue / q                             - 状態とキューを表示
+  remove <番号> / rm <番号>             - キューからその曲だけ削除（queueで表示される番号）
+  volume <0-100> / v <0-100>            - 音量を変更
+  random / r                            - ランダムな曲を1曲追加
+  random loop / loop                    - キューが空になるたび自動でランダム再生
+  loop stop                             - ランダムループを停止
+  help / ?                              - このヘルプを表示`;
+
+// Console commands, typed directly into this terminal window - mirrors
+// everything the web UI (http://localhost:PORT) can do, for when it's more
+// convenient to just type into this window instead.
 function startConsoleCommands() {
   const rl = readline.createInterface({ input: process.stdin });
-  rl.on('line', async (line) => {
-    const cmd = line.trim().toLowerCase();
+  rl.on('line', async (rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    const spaceIndex = line.indexOf(' ');
+    const cmd = (spaceIndex === -1 ? line : line.slice(0, spaceIndex)).toLowerCase();
+    const arg = spaceIndex === -1 ? '' : line.slice(spaceIndex + 1).trim();
+    const lowerLine = line.toLowerCase();
 
-    if (cmd === 'loop stop' || cmd === 'stoploop' || cmd === 'noloop') {
+    if (cmd === 'help' || cmd === '?') {
+      console.log(CONSOLE_HELP);
+      return;
+    }
+
+    if (lowerLine === 'loop stop' || cmd === 'stoploop' || cmd === 'noloop') {
       randomLoopEnabled = false;
       console.log('ランダムループを停止しました（今流れている曲とキューの残りは最後まで再生されます）。');
       return;
     }
 
-    if (cmd === 'random loop' || cmd === 'loop' || cmd === 'rloop') {
+    if (lowerLine === 'random loop' || cmd === 'loop' || cmd === 'rloop') {
       if (randomLoopEnabled) {
         console.log('ランダムループはすでに有効です。');
         return;
@@ -702,16 +738,71 @@ function startConsoleCommands() {
       return;
     }
 
-    if (cmd !== 'random' && cmd !== 'r') return;
-
-    console.log('ランダム再生: 曲を探しています...');
-    try {
-      const track = await pickPlayableTrack();
-      enqueueTrack(track);
-      console.log(`キューに追加しました: ${track.title}`);
-    } catch (err) {
-      console.error('ランダム再生の取得に失敗しました:', err);
+    if (cmd === 'random' || cmd === 'r') {
+      console.log('ランダム再生: 曲を探しています...');
+      try {
+        const track = await pickPlayableTrack();
+        enqueueTrack(track);
+        console.log(`キューに追加しました: ${track.title}`);
+      } catch (err) {
+        console.error('ランダム再生の取得に失敗しました:', err);
+      }
+      return;
     }
+
+    if (cmd === 'play' || cmd === 'p') {
+      if (!arg) {
+        console.log('使い方: play <URLまたは検索ワード>');
+        return;
+      }
+      try {
+        const track = await queueTrack(arg);
+        console.log(`キューに追加しました: ${track.title}`);
+      } catch (err) {
+        console.error('曲の取得に失敗しました:', err.message || err);
+      }
+      return;
+    }
+
+    if (cmd === 'skip' || cmd === 's') {
+      const result = doSkip();
+      console.log(result.error || 'スキップしました。');
+      return;
+    }
+
+    if (cmd === 'stop') {
+      doStop();
+      console.log('停止し、キューを空にしました。');
+      return;
+    }
+
+    if (cmd === 'queue' || cmd === 'q' || cmd === 'list') {
+      const s = getStateSnapshot();
+      console.log(`状態: ${s.status}`);
+      console.log(`再生中: ${s.current ? s.current.title : '(なし)'}`);
+      console.log(`音量: ${s.volume}%`);
+      if (s.queue.length === 0) {
+        console.log('キュー: (空)');
+      } else {
+        console.log('キュー:');
+        s.queue.forEach((title, i) => console.log(`  [${i}] ${title}`));
+      }
+      return;
+    }
+
+    if (cmd === 'remove' || cmd === 'rm' || cmd === 'del') {
+      const result = doRemoveFromQueue(Number(arg));
+      console.log(result.error ? result.error : `削除しました: ${result.removed.title}`);
+      return;
+    }
+
+    if (cmd === 'volume' || cmd === 'v') {
+      const result = doSetVolume(Number(arg));
+      console.log(result.error ? result.error : `音量を${result.volume}%にしました。`);
+      return;
+    }
+
+    console.log(`不明なコマンドです: "${cmd}"（"help" で使えるコマンド一覧を表示）`);
   });
 }
 
@@ -742,7 +833,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
     console.log('公開用トンネルを起動しています...');
     startTunnel(PORT);
     console.log(`ランダム再生の曲リストは ${SONGS_FILE} を編集するとカスタマイズできます。`);
-    console.log('このコンソールで "random" と入力するとランダム再生、"random loop" で無限ループ再生、"loop stop" で停止します。');
+    console.log('このコンソールでも操作できます。"help" と入力するとコマンド一覧を表示します。');
     startConsoleCommands();
   });
 })();
