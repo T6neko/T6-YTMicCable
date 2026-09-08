@@ -230,12 +230,6 @@ function isPlaylistUrl(str) {
   return isUrl(str) && /[?&]list=/i.test(str);
 }
 
-// Radio/"Mix" lists (list=RD...) are algorithmically generated and
-// effectively open-ended - yt-dlp will keep paginating through YouTube's
-// endless recommendations unless capped. Regular playlists are usually far
-// shorter than this, so the cap rarely matters for them.
-const MAX_PLAYLIST_TRACKS = 100;
-
 // Lists every track in a playlist/mix via yt-dlp's flat-playlist mode (no
 // per-video resolution, same lightweight approach as fetchTrendingCandidates).
 function fetchPlaylistEntries(url) {
@@ -274,11 +268,10 @@ function fetchPlaylistEntries(url) {
 }
 
 async function queuePlaylist(url) {
-  const entries = await fetchPlaylistEntries(url);
-  const tracks = entries.slice(0, MAX_PLAYLIST_TRACKS);
+  const tracks = await fetchPlaylistEntries(url);
   tracks.forEach((t) => queue.push(t));
   if (!current) playNext();
-  return { tracks, totalFound: entries.length };
+  return { tracks };
 }
 
 // Searches the user's winget install location for a given exe when it isn't
@@ -721,12 +714,12 @@ app.post('/api/play', async (req, res) => {
 
   try {
     if (isPlaylistUrl(trimmed)) {
-      const { tracks, totalFound } = await queuePlaylist(trimmed);
+      const { tracks } = await queuePlaylist(trimmed);
       if (tracks.length === 0) {
         return res.status(404).json({ error: 'No playable tracks found in that playlist' });
       }
       return res.json({
-        queuedPlaylist: { count: tracks.length, totalFound, titles: tracks.map((t) => t.title) },
+        queuedPlaylist: { count: tracks.length, titles: tracks.map((t) => t.title) },
         queue: queue.map((t) => t.title),
       });
     }
@@ -868,11 +861,11 @@ function startConsoleCommands() {
       try {
         if (isPlaylistUrl(arg)) {
           console.log('プレイリストを読み込んでいます...');
-          const { tracks, totalFound } = await queuePlaylist(arg);
+          const { tracks } = await queuePlaylist(arg);
           if (tracks.length === 0) {
             console.log('再生できる曲が見つかりませんでした。');
           } else {
-            console.log(`キューに${tracks.length}曲追加しました${totalFound > tracks.length ? `（全${totalFound}曲中、上限${MAX_PLAYLIST_TRACKS}曲まで）` : ''}。`);
+            console.log(`キューに${tracks.length}曲追加しました。`);
           }
         } else {
           const track = await queueTrack(arg);

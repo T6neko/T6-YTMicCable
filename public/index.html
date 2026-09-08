@@ -175,9 +175,7 @@ async function play() {
     } else {
       const data = await res.json();
       if (data.queuedPlaylist) {
-        const { count, totalFound } = data.queuedPlaylist;
-        const suffix = totalFound > count ? `（全${totalFound}曲中、上限${count}曲まで）` : '';
-        showToast(`プレイリストから${count}曲追加しました${suffix}`, 'success');
+        showToast(`プレイリストから${data.queuedPlaylist.count}曲追加しました`, 'success');
       } else {
         showToast(`追加しました: ${data.queued.title}`, 'success');
       }
