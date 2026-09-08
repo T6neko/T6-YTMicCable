@@ -88,6 +88,7 @@
 
   <div class="row">
     <button id="skipBtn" class="secondary">スキップ</button>
+    <button id="shuffleBtn" class="secondary">シャッフル</button>
     <button id="stopBtn" class="secondary">停止・キュークリア</button>
   </div>
 
@@ -118,6 +119,7 @@
 const queryInput = document.getElementById('query');
 const playBtn = document.getElementById('playBtn');
 const skipBtn = document.getElementById('skipBtn');
+const shuffleBtn = document.getElementById('shuffleBtn');
 const stopBtn = document.getElementById('stopBtn');
 const statusText = document.getElementById('statusText');
 const nowPlaying = document.getElementById('nowPlaying');
@@ -197,6 +199,12 @@ async function skip() {
 
 async function stop() {
   await fetch(withCode('/api/stop'), { method: 'POST' });
+  refreshState();
+}
+
+async function shuffle() {
+  await fetch(withCode('/api/shuffle'), { method: 'POST' });
+  showToast('キューをシャッフルしました');
   refreshState();
 }
 
@@ -282,6 +290,7 @@ queryInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') play();
 });
 skipBtn.addEventListener('click', skip);
+shuffleBtn.addEventListener('click', shuffle);
 stopBtn.addEventListener('click', stop);
 
 setInterval(refreshState, 2000);

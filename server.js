@@ -679,6 +679,17 @@ function doStop() {
   return { ok: true };
 }
 
+// Shuffles the not-yet-playing queue in place (Fisher-Yates). The currently
+// playing track isn't touched.
+function doShuffle() {
+  if (queue.length < 2) return { ok: true, queue: queue.map((t) => t.title) };
+  for (let i = queue.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [queue[i], queue[j]] = [queue[j], queue[i]];
+  }
+  return { ok: true, queue: queue.map((t) => t.title) };
+}
+
 // Removes a single not-yet-playing track from the queue by its position
 // (0 = next up). The currently playing track isn't touched - use doSkip()
 // for that.
@@ -746,6 +757,10 @@ app.delete('/api/queue/:index', (req, res) => {
   res.status(result.error ? 400 : 200).json(result);
 });
 
+app.post('/api/shuffle', (req, res) => {
+  res.json(doShuffle());
+});
+
 app.post('/api/volume', (req, res) => {
   const result = doSetVolume(Number(req.body.volume));
   res.status(result.error ? 400 : 200).json(result);
@@ -799,6 +814,7 @@ const CONSOLE_HELP = `使えるコマンド:
   skip / s                              - 今の曲をスキップ
   stop                                  - 停止してキューを空にする
   queue / q                             - 状態とキューを表示
+  shuffle / sh                          - キューの順番をシャッフル
   remove <番号> / rm <番号>             - キューからその曲だけ削除（queueで表示される番号）
   volume <0-100> / v <0-100>            - 音量を変更
   random / r                            - ランダムな曲を1曲追加
@@ -900,6 +916,12 @@ function startConsoleCommands() {
         console.log('キュー:');
         s.queue.forEach((title, i) => console.log(`  [${i}] ${title}`));
       }
+      return;
+    }
+
+    if (cmd === 'shuffle' || cmd === 'sh') {
+      doShuffle();
+      console.log('キューをシャッフルしました。');
       return;
     }
 
