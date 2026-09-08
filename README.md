@@ -12,6 +12,7 @@ npm start
 `ffmpeg`/`yt-dlp`/`cloudflared`/`VB-Audio Virtual Cable` が無い場合は自動でインストールされます
 （初回のみ時間がかかります）。VB-CABLEのインストール中だけ、Windowsの管理者権限の確認
 ダイアログが表示されるので「はい」を押してください（これだけは自動化できません）。
+`yt-dlp` はYouTube側の仕様変更に追従するため、起動のたびに自動で最新版へ更新されます。
 
 起動後、`http://localhost:3535` をブラウザで開きます。
 

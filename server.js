@@ -374,6 +374,18 @@ async function ensureDependencies() {
   }
 }
 
+// yt-dlp needs to keep up with YouTube's frequent changes (extraction
+// breaks otherwise), so it's self-updated on every startup via its own
+// built-in updater rather than relying on winget upgrades.
+function updateYtDlp() {
+  if (!isBinaryAvailable('yt-dlp', 'yt-dlp.exe')) return; // ensureDependencies() already reported this
+  console.log('[起動時アップデート] yt-dlp を最新版に更新しています...');
+  const result = spawnSync(resolveBinary('yt-dlp', 'yt-dlp.exe'), ['-U'], { stdio: 'inherit' });
+  if (result.error) {
+    console.error('[起動時アップデート] yt-dlp の更新に失敗しました:', result.error.message);
+  }
+}
+
 const VBCABLE_DOWNLOAD_URL = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip';
 
 function isVBCableInstalled() {
@@ -961,6 +973,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
 (async () => {
   ensureSongsFile();
   await ensureDependencies();
+  updateYtDlp();
   await ensureVBCable();
 
   app.listen(PORT, () => {
