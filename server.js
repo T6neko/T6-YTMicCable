@@ -223,6 +223,64 @@ function isUrl(str) {
   return /^https?:\/\//i.test(str);
 }
 
+// Matches a YouTube playlist or "Mix"/radio URL (?list=PL... or ?list=RD...,
+// the latter from "start_radio=1" links) - these get every track in the
+// list queued at once, instead of resolving to just the one linked video.
+function isPlaylistUrl(str) {
+  return isUrl(str) && /[?&]list=/i.test(str);
+}
+
+// Radio/"Mix" lists (list=RD...) are algorithmically generated and
+// effectively open-ended - yt-dlp will keep paginating through YouTube's
+// endless recommendations unless capped. Regular playlists are usually far
+// shorter than this, so the cap rarely matters for them.
+const MAX_PLAYLIST_TRACKS = 100;
+
+// Lists every track in a playlist/mix via yt-dlp's flat-playlist mode (no
+// per-video resolution, same lightweight approach as fetchTrendingCandidates).
+function fetchPlaylistEntries(url) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(resolveBinary('yt-dlp', 'yt-dlp.exe'), [
+      '--no-warnings',
+      '--flat-playlist',
+      '-J',
+      url,
+    ]);
+
+    let out = '';
+    let err = '';
+    proc.stdout.on('data', (d) => { out += d; });
+    proc.stderr.on('data', (d) => { err += d; });
+
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code !== 0 || !out.trim()) {
+        return reject(new Error(err || `yt-dlp exited with code ${code}`));
+      }
+      try {
+        const data = JSON.parse(out);
+        const entries = (data.entries || [])
+          .filter((e) => (
+            e && e.id && e.title &&
+            !e.is_live && e.live_status !== 'is_live' && e.live_status !== 'is_upcoming'
+          ))
+          .map((e) => ({ title: e.title, url: e.url || `https://www.youtube.com/watch?v=${e.id}` }));
+        resolve(entries);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+async function queuePlaylist(url) {
+  const entries = await fetchPlaylistEntries(url);
+  const tracks = entries.slice(0, MAX_PLAYLIST_TRACKS);
+  tracks.forEach((t) => queue.push(t));
+  if (!current) playNext();
+  return { tracks, totalFound: entries.length };
+}
+
 // Searches the user's winget install location for a given exe when it isn't
 // on PATH yet (common right after `winget install`, since an already-open
 // terminal keeps the PATH it had at launch until reopened).
@@ -659,9 +717,21 @@ app.post('/api/play', async (req, res) => {
   if (!query || typeof query !== 'string' || !query.trim()) {
     return res.status(400).json({ error: 'query is required' });
   }
+  const trimmed = query.trim();
 
   try {
-    const track = await queueTrack(query.trim());
+    if (isPlaylistUrl(trimmed)) {
+      const { tracks, totalFound } = await queuePlaylist(trimmed);
+      if (tracks.length === 0) {
+        return res.status(404).json({ error: 'No playable tracks found in that playlist' });
+      }
+      return res.json({
+        queuedPlaylist: { count: tracks.length, totalFound, titles: tracks.map((t) => t.title) },
+        queue: queue.map((t) => t.title),
+      });
+    }
+
+    const track = await queueTrack(trimmed);
     res.json({ queued: track, queue: queue.map((t) => t.title) });
   } catch (err) {
     console.error(err);
@@ -792,12 +862,22 @@ function startConsoleCommands() {
 
     if (cmd === 'play' || cmd === 'p') {
       if (!arg) {
-        console.log('使い方: play <URLまたは検索ワード>');
+        console.log('使い方: play <URL・プレイリストURL・検索ワード>');
         return;
       }
       try {
-        const track = await queueTrack(arg);
-        console.log(`キューに追加しました: ${track.title}`);
+        if (isPlaylistUrl(arg)) {
+          console.log('プレイリストを読み込んでいます...');
+          const { tracks, totalFound } = await queuePlaylist(arg);
+          if (tracks.length === 0) {
+            console.log('再生できる曲が見つかりませんでした。');
+          } else {
+            console.log(`キューに${tracks.length}曲追加しました${totalFound > tracks.length ? `（全${totalFound}曲中、上限${MAX_PLAYLIST_TRACKS}曲まで）` : ''}。`);
+          }
+        } else {
+          const track = await queueTrack(arg);
+          console.log(`キューに追加しました: ${track.title}`);
+        }
       } catch (err) {
         console.error('曲の取得に失敗しました:', err.message || err);
       }

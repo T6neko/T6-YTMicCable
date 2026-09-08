@@ -82,7 +82,7 @@
   <p>YouTubeのURL、または検索ワード（曲名など）を入力して再生してください。</p>
 
   <div class="row">
-    <input type="text" id="query" placeholder="URLまたは検索ワード" autofocus>
+    <input type="text" id="query" placeholder="URL・プレイリストURL・検索ワード" autofocus>
     <button id="playBtn">再生</button>
   </div>
 
@@ -174,7 +174,13 @@ async function play() {
       showToast(err.error || '再生に失敗しました', 'error');
     } else {
       const data = await res.json();
-      showToast(`追加しました: ${data.queued.title}`, 'success');
+      if (data.queuedPlaylist) {
+        const { count, totalFound } = data.queuedPlaylist;
+        const suffix = totalFound > count ? `（全${totalFound}曲中、上限${count}曲まで）` : '';
+        showToast(`プレイリストから${count}曲追加しました${suffix}`, 'success');
+      } else {
+        showToast(`追加しました: ${data.queued.title}`, 'success');
+      }
       queryInput.value = '';
     }
   } catch (e) {
